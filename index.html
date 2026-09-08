@@ -822,12 +822,19 @@ function renderAll(){
   layoutLeaves(); drawLinks(); markContent(); updateMinimap();
 }
 
-/* posiciona las subsecciones sueltas al lado de su nodo (modo diagrama) */
+/* posiciona las subsecciones sueltas al lado de su nodo (modo diagrama)
+   En layout radial las coloca en la dirección que apunta el nodo desde el centro */
 function layoutLeaves(){
   if(mode !== 'split') return;
+
+  // Centro del mapa (raíz única si existe, sino centro estimado)
+  let cx = null, cy = null;
+  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)){ cx = d.x; cy = d.y; } });
+
   nodes.forEach(d => {
     if(!d.items.length) return;
     const n = el(d.id); if(!n) return;
+    const nw = n.offsetWidth, nh = n.offsetHeight;
     const stacked = [];
     d.items.forEach(it => {
       const e = leafEl(it.id); if(!e) return;
@@ -838,12 +845,70 @@ function layoutLeaves(){
       } else { e.classList.remove('free'); stacked.push(e); }
     });
     if(!stacked.length) return;
-    const x = d.x + n.offsetWidth + TRUNK + ARM;
-    let total = 0;
-    stacked.forEach(e => { e.style.left = x+'px'; total += e.offsetHeight; });
-    total += LEAF_GAP * (stacked.length - 1);
-    let y = d.y + n.offsetHeight/2 - total/2;
-    stacked.forEach(e => { e.style.top = Math.round(y)+'px'; y += e.offsetHeight + LEAF_GAP; });
+
+    // Determinar dirección del nodo respecto al centro
+    // Si no hay centro (mapa manual sin raíz) → siempre a la derecha
+    let leafX, leafStartY, vertical = false, goDown = true, goRight = true;
+
+    if(cx !== null && cy !== null && d.id !== (()=>{ let r=null; nodes.forEach(nd=>{ if(!nd.parent||!nodes.has(nd.parent)) r=nd.id; }); return r; })()){
+      const nodeCx = d.x + nw/2;
+      const nodeCy = d.y + nh/2;
+      const rootCx = cx + NODE_W/2;
+      const rootCy = cy + 40;
+      const dx = nodeCx - rootCx;
+      const dy = nodeCy - rootCy;
+      const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+      // Si el nodo es principalmente horizontal respecto al centro
+      if(absDx >= absDy * 0.5){
+        // colocar leaves horizontalmente (al mismo lado que el nodo)
+        vertical = false;
+        goRight  = dx >= 0;
+        let total = 0;
+        stacked.forEach(e => total += e.offsetHeight);
+        total += LEAF_GAP * (stacked.length - 1);
+        if(goRight){
+          leafX = d.x + nw + TRUNK + ARM;
+        } else {
+          leafX = d.x - LEAF_W - TRUNK - ARM;
+        }
+        leafStartY = d.y + nh/2 - total/2;
+      } else {
+        // colocar leaves verticalmente (arriba o abajo del nodo)
+        vertical = true;
+        goDown   = dy >= 0;
+        let total = 0;
+        stacked.forEach(e => total += e.offsetHeight);
+        total += LEAF_GAP * (stacked.length - 1);
+        if(goDown){
+          leafStartY = d.y + nh + TRUNK + ARM;
+        } else {
+          leafStartY = d.y - total - TRUNK - ARM;
+        }
+        leafX = d.x + nw/2 - LEAF_W/2;
+      }
+    } else {
+      // sin info de centro o es la raíz → derecha por defecto
+      vertical = false;
+      let total = 0;
+      stacked.forEach(e => total += e.offsetHeight);
+      total += LEAF_GAP * (stacked.length - 1);
+      leafX = d.x + nw + TRUNK + ARM;
+      leafStartY = d.y + nh/2 - total/2;
+    }
+
+    if(!vertical){
+      stacked.forEach(e => { e.style.left = Math.round(leafX)+'px'; });
+      let y = leafStartY;
+      stacked.forEach(e => { e.style.top = Math.round(y)+'px'; y += e.offsetHeight + LEAF_GAP; });
+    } else {
+      let y = leafStartY;
+      stacked.forEach(e => {
+        e.style.left = Math.round(leafX)+'px';
+        e.style.top  = Math.round(y)+'px';
+        y += e.offsetHeight + LEAF_GAP;
+      });
+    }
   });
 }
 function clusterHeight(d){
@@ -914,13 +979,45 @@ function drawLinks(){
         } else els.push(e);
       });
       if(!els.length) return;
-      const startX = A.x + A.w, cy = A.y + A.h/2;
-      const trunkX = startX + TRUNK;
-      const centers = els.map(e => e.offsetTop + e.offsetHeight/2);
-      const top = Math.min(cy, ...centers), bot = Math.max(cy, ...centers);
-      let p = `M${startX} ${cy}H${trunkX}M${trunkX} ${top}V${bot}`;
-      centers.forEach((c, i) => { p += `M${trunkX} ${c}H${els[i].offsetLeft}`; });
-      d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
+
+      // Determinar si las leaves están a la derecha, izquierda, arriba o abajo
+      const firstEl = els[0];
+      const leafCx  = firstEl.offsetLeft + firstEl.offsetWidth/2;
+      const leafCy  = firstEl.offsetTop  + firstEl.offsetHeight/2;
+      const nodeCx  = A.x + A.w/2;
+      const nodeCy  = A.y + A.h/2;
+      const dxL = leafCx - nodeCx, dyL = leafCy - nodeCy;
+      const horizontal = Math.abs(dxL) >= Math.abs(dyL) * 0.5;
+
+      if(horizontal){
+        // conexión horizontal (izquierda o derecha)
+        const goRight = leafCx >= nodeCx;
+        const startX  = goRight ? A.x + A.w : A.x;
+        const cy2     = A.y + A.h/2;
+        const trunkX  = goRight ? startX + TRUNK : startX - TRUNK;
+        const centers = els.map(e => e.offsetTop + e.offsetHeight/2);
+        const top = Math.min(cy2, ...centers), bot = Math.max(cy2, ...centers);
+        let p = `M${startX} ${cy2}H${trunkX}M${trunkX} ${top}V${bot}`;
+        centers.forEach((c, i) => {
+          const leafEdge = goRight ? els[i].offsetLeft : els[i].offsetLeft + els[i].offsetWidth;
+          p += `M${trunkX} ${c}H${leafEdge}`;
+        });
+        d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
+      } else {
+        // conexión vertical (arriba o abajo)
+        const goDown  = leafCy >= nodeCy;
+        const startY  = goDown ? A.y + A.h : A.y;
+        const cx2     = A.x + A.w/2;
+        const trunkY  = goDown ? startY + TRUNK : startY - TRUNK;
+        const centers = els.map(e => e.offsetLeft + e.offsetWidth/2);
+        const left2   = Math.min(cx2, ...centers), right2 = Math.max(cx2, ...centers);
+        let p = `M${cx2} ${startY}V${trunkY}M${left2} ${trunkY}H${right2}`;
+        centers.forEach((c, i) => {
+          const leafEdge = goDown ? els[i].offsetTop : els[i].offsetTop + els[i].offsetHeight;
+          p += `M${c} ${trunkY}V${leafEdge}`;
+        });
+        d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
+      }
     });
   }
   links.innerHTML = d;
@@ -1338,7 +1435,7 @@ function tidy(){
 function tidyRadial(root){
   const NW      = 300;   // ancho nodo + margen horizontal
   const NH      = 120;   // alto nodo  + margen vertical
-  const R_STEP  = 380;   // distancia mínima entre anillos
+  const R_STEP  = 520;   // distancia mínima entre anillos (aumentada)
   const CX = 6200, CY = 4400;
 
   /* ── 1. leafCount ── */
