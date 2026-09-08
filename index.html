@@ -1307,6 +1307,92 @@ function setMode(m){
 /* ─────────────────────────── ordenar ──────────────────────────────── */
 function tidy(){
   if(!nodes.size){ toast('El mapa está vacío.'); return; }
+
+  const roots = [];
+  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)) roots.push(d); });
+
+  if(roots.length === 1){
+    tidyRadial(roots[0]);
+  } else {
+    tidyTree(roots);
+  }
+  nodes.forEach(d => { const e = el(d.id); if(e){ e.style.left = d.x+'px'; e.style.top = d.y+'px'; } });
+  layoutLeaves(); drawLinks(); fit();
+}
+
+/* Layout radial: raíz en el centro, hijos en arco, nietos más afuera */
+function tidyRadial(root){
+  const NODE_W_EST  = NODE_W;
+  const NODE_H_EST  = 80;
+  // radio base por nivel — aumenta con la profundidad
+  const RADII = [0, 420, 780, 1120, 1440];
+  const getR  = lvl => RADII[Math.min(lvl, RADII.length-1)] + Math.max(0, lvl - RADII.length+1)*340;
+
+  // calcular peso (total de hojas) de cada subárbol para repartir arco proporcional
+  function weight(id){
+    const kids = childrenOf(id);
+    if(!kids.length) return 1;
+    return kids.reduce((s,k)=> s + weight(k.id), 0);
+  }
+
+  const totalWeight = weight(root.id);
+  const children = childrenOf(root.id);
+
+  // Asignar ángulo central a cada hijo de la raíz:
+  // los distribuimos uniformemente en 360° (o en arco completo)
+  // con una pequeña separación mínima para que no se solapen.
+  function assignAngles(parentId, startAngle, sweepAngle, depth){
+    const kids = childrenOf(parentId);
+    if(!kids.length) return;
+    const parentW = weight(parentId);
+    let cursor = startAngle;
+    kids.forEach(k => {
+      const kw = weight(k.id);
+      const arc = sweepAngle * (kw / parentW);
+      const midAngle = cursor + arc / 2;
+      const r = getR(depth);
+      k.id; // just reference
+      const d = nodes.get(k.id);
+      d.x = Math.round(root.x + NODE_W_EST/2 + r * Math.cos(midAngle) - NODE_W_EST/2);
+      d.y = Math.round(root.y + NODE_H_EST/2 + r * Math.sin(midAngle) - NODE_H_EST/2);
+      assignAngles(k.id, cursor, arc, depth + 1);
+      cursor += arc;
+    });
+  }
+
+  // raíz en centro del mundo
+  root.x = 6000;
+  root.y = 4300;
+
+  // separación mínima angular entre hijos directos para evitar solape
+  const n = children.length;
+  // sweep completo siempre 360° — distribuye uniforme
+  assignAngles(root.id, -Math.PI / 2, 2 * Math.PI, 1);
+
+  // nudge: si dos nodos de mismo nivel se solapan, los separa levemente
+  function nudgeSiblings(parentId, depth){
+    const kids = childrenOf(parentId);
+    if(!kids.length) return;
+    // ordenar por ángulo (y actual)
+    kids.sort((a,b) => a.y - b.y);
+    const minGap = NODE_H_EST + 20;
+    for(let i=1; i<kids.length; i++){
+      const prev = nodes.get(kids[i-1].id);
+      const cur  = nodes.get(kids[i].id);
+      const dy = cur.y - prev.y;
+      if(Math.abs(cur.x - prev.x) < NODE_W_EST + 20 && dy < minGap){
+        const push = (minGap - dy) / 2;
+        prev.y -= push;
+        cur.y  += push;
+      }
+    }
+    kids.forEach(k => nudgeSiblings(k.id, depth+1));
+  }
+  nudgeSiblings(root.id, 1);
+}
+
+/* Layout árbol clásico (múltiples raíces sin centro único) */
+function tidyTree(roots){
   const col = (mode === 'split' ? 620 : 360);
   const VGAP = 30;
   let cursor = 0;
@@ -1325,8 +1411,6 @@ function tidy(){
     }
     d.x = depth * col; d.y = Math.round(y);
   }
-  const roots = [];
-  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)) roots.push(d); });
   roots.forEach(r => { place(r, 0); cursor += 40; });
   nodes.forEach(d => { if(!seen.has(d.id)) place(d, 0); });
 
@@ -1334,8 +1418,6 @@ function tidy(){
   nodes.forEach(d => { minX = Math.min(minX, d.x); minY = Math.min(minY, d.y); });
   const off = {x:6000 - minX, y:4200 - minY};
   nodes.forEach(d => { d.x += off.x; d.y += off.y; });
-  nodes.forEach(d => { const e = el(d.id); if(e){ e.style.left = d.x+'px'; e.style.top = d.y+'px'; } });
-  layoutLeaves(); drawLinks(); fit();
 }
 
 function bounds(pad){
