@@ -1321,85 +1321,107 @@ function tidy(){
 }
 
 /*
- * Layout radial correcto
- * ──────────────────────
- * Algoritmo en dos pasadas:
- *  1) bottom-up: calcular el "tamaño angular" (leafCount) de cada subárbol
- *  2) top-down:  asignar a cada nodo su ángulo central dentro del sector
- *                que le corresponde a su padre, y el radio según la capa.
+ * Layout radial — hijos siempre hacia afuera en la dirección del padre
+ * ─────────────────────────────────────────────────────────────────────
+ * Cada nodo recibe un SECTOR angular (ángulo central ± mitad del arco).
+ * Sus hijos se distribuyen DENTRO de ese mismo sector, más afuera.
+ * Así un nodo a la derecha tiene sus hijos más a la derecha,
+ * uno arriba-izquierda los tiene más arriba-izquierda, etc.
  *
- * Radio de cada capa = max( radio_mínimo_para_no_solaparse, radio_anterior + paso )
- * Radio mínimo = (n_nodos_en_capa × diámetro_nodo) / (2π × fracción_del_arco)
+ * Pasadas:
+ *  1) bottom-up : leafCount  → cuántas hojas tiene cada subárbol
+ *  2) bottom-up : minArc     → ángulo mínimo que necesita cada nodo
+ *                              para que sus hijos no se solapen al
+ *                              radio que les corresponda
+ *  3) top-down  : asignar ángulo central y radio
  */
 function tidyRadial(root){
-  const NW  = 290;   // ancho estimado nodo + margen
-  const NH  = 110;   // alto estimado nodo + margen
-  const GAP = 40;    // separación mínima extra entre nodos
+  const NW      = 300;   // ancho nodo + margen horizontal
+  const NH      = 120;   // alto nodo  + margen vertical
+  const R_STEP  = 380;   // distancia mínima entre anillos
+  const CX = 6200, CY = 4400;
 
-  /* 1. Contar hojas del subárbol (peso para distribuir arco) */
+  /* ── 1. leafCount ── */
   const leafCount = new Map();
   function countLeaves(id){
     const kids = childrenOf(id);
-    if(!kids.length){ leafCount.set(id, 1); return 1; }
+    if(!kids.length){ leafCount.set(id,1); return 1; }
     const s = kids.reduce((a,k)=> a + countLeaves(k.id), 0);
-    leafCount.set(id, s);
-    return s;
+    leafCount.set(id,s); return s;
   }
   countLeaves(root.id);
 
-  /* 2. Calcular radio mínimo por nivel para que los nodos no se solapen.
-        Se calcula como la circunferencia necesaria dividida por 2π,
-        donde la circunferencia = nNodos × (diámetro_nodo + GAP).
-        Tomamos el mayor entre ese mínimo y radio_anterior + paso_mínimo. */
-  const levelNodes = new Map();   // depth -> [ids]
-  function gatherLevels(id, depth){
-    if(!levelNodes.has(depth)) levelNodes.set(depth,[]);
-    levelNodes.get(depth).push(id);
-    childrenOf(id).forEach(k => gatherLevels(k.id, depth+1));
+  /* ── 2. minArc por nodo: el arco mínimo para que sus hijos quepan
+           en el anillo radio r sin solaparse entre sí.
+           chord = distancia mínima entre centros de nodos hermanos
+                 = sqrt(NW² + NH²) + margen
+           Para n hijos en radio r con arco total A:
+             chord ≈ 2·r·sin(A/(2n))  =>  A = 2n·arcsin(chord/(2r))
+           Elegimos r como radio_padre + R_STEP.                    ── */
+  const nodeAngle  = new Map();   // ángulo central asignado (top-down)
+  const nodeRadius = new Map();   // radio asignado (top-down)
+  const nodeArc    = new Map();   // arco total asignado al sector del nodo
+
+  /* radio del nodo según su profundidad desde la raíz */
+  const depthOf = new Map();
+  function calcDepth(id, d){ depthOf.set(id,d); childrenOf(id).forEach(k=>calcDepth(k.id,d+1)); }
+  calcDepth(root.id, 0);
+
+  function radiusAt(depth){ return depth * R_STEP; }
+
+  /* ── 3. top-down: distribuir sectores ── */
+  /* Ángulo de apertura mínima para n hijos en radio r */
+  function minSweepForChildren(n, r){
+    if(n === 0) return 0;
+    const chord = Math.sqrt(NW*NW + NH*NH) + 20;  // separación mínima entre centros
+    // arco mínimo total = n × separación_angular_mínima
+    // sep_angular = 2·arcsin(chord / (2·r))  [ángulo entre centros vecinos]
+    const halfAngle = Math.asin(Math.min(1, chord / (2 * Math.max(r, chord))));
+    return n * 2 * halfAngle;
   }
-  gatherLevels(root.id, 0);
 
-  const radii = new Map();   // depth -> radius
-  radii.set(0, 0);
-  const MAX_DEPTH = Math.max(...levelNodes.keys());
-  for(let d = 1; d <= MAX_DEPTH; d++){
-    const n   = (levelNodes.get(d) || []).length;
-    const dia = Math.sqrt(NW*NW + NH*NH);             // diagonal como "diámetro"
-    const minR = (n * (dia + GAP)) / (2 * Math.PI);   // radio para que quepan en círculo completo
-    const prevR = radii.get(d-1) || 0;
-    radii.set(d, Math.max(minR, prevR + dia + GAP));
-  }
-
-  /* 3. Colocar la raíz en el centro del mundo */
-  const CX = 6200, CY = 4400;
-  root.x = Math.round(CX - NW/2);
-  root.y = Math.round(CY - NH/2);
-
-  /* 4. Top-down: asignar posición a cada nodo según su sector angular */
-  function place(id, angleStart, angleSweep, depth){
+  function distribute(id, centerAngle, availableSweep, depth){
     const kids = childrenOf(id);
     if(!kids.length) return;
 
-    const r       = radii.get(depth);
-    const total   = leafCount.get(id);
-    let cursor    = angleStart;
+    const r      = radiusAt(depth);
+    const total  = leafCount.get(id);
 
+    // asegurarnos de que el sweep disponible es suficiente para los hijos
+    const minSweep = minSweepForChildren(kids.length, r);
+    const sweep  = Math.max(availableSweep, minSweep);
+
+    // distribuir proporcionalmente al leafCount de cada hijo
+    let cursor = centerAngle - sweep / 2;
     kids.forEach(k => {
-      const kLeaves = leafCount.get(k.id);
-      const arc     = angleSweep * (kLeaves / total);
-      const mid     = cursor + arc / 2;
+      const kLeaves  = leafCount.get(k.id);
+      const kArc     = sweep * (kLeaves / total);
+      const kCenter  = cursor + kArc / 2;
 
       const kd = nodes.get(k.id);
-      kd.x = Math.round(CX + r * Math.cos(mid) - NW/2);
-      kd.y = Math.round(CY + r * Math.sin(mid) - NH/2);
+      kd.x = Math.round(CX + r * Math.cos(kCenter) - NW/2);
+      kd.y = Math.round(CY + r * Math.sin(kCenter) - NH/2);
 
-      place(k.id, cursor, arc, depth + 1);
-      cursor += arc;
+      nodeAngle.set(k.id,  kCenter);
+      nodeRadius.set(k.id, r);
+      nodeArc.set(k.id,    kArc);
+
+      // los hijos de k se distribuyen dentro del mismo sector kArc,
+      // centrado en kCenter → se expanden en la misma dirección
+      distribute(k.id, kCenter, kArc, depth + 1);
+      cursor += kArc;
     });
   }
 
-  /* Punto de partida: -90° (arriba) para que el primer hijo quede arriba */
-  place(root.id, -Math.PI / 2, 2 * Math.PI, 1);
+  /* raíz en el centro */
+  root.x = Math.round(CX - NW/2);
+  root.y = Math.round(CY - NH/2);
+  nodeAngle.set(root.id,  0);
+  nodeRadius.set(root.id, 0);
+  nodeArc.set(root.id, 2 * Math.PI);
+
+  /* los hijos directos de la raíz reparten los 360° completos */
+  distribute(root.id, -Math.PI / 2, 2 * Math.PI, 1);
 }
 
 /* Layout árbol clásico (múltiples raíces sin centro único) */
