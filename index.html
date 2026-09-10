@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mapa mental</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2316241D'/><path d='M10.5 16h6.5M17 16V9.5h3M17 16v6.5h3' fill='none' stroke='%239BB0A1' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><circle cx='9' cy='16' r='4.4' fill='%23E2A33A'/><circle cx='23' cy='9.5' r='3.6' fill='%23D3455B'/><circle cx='23' cy='22.5' r='3.6' fill='%233E7C59'/></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2316241D'/><path d='M10.5 16h6.5M17 16V9.5h3M17 16v6.5h3' fill='none' stroke='%239BB0A1' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/><circle cx='9' cy='16' r='4.4' fill='%23E2A33A'/><circle cx='23' cy='9.5' r='3.6' fill='%23D3455B'/><circle cx='23' cy='22.5' r='3.6' fill='%233E7C59'/></svg>">
+<meta name="theme-color" content="#16241D">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -336,10 +339,14 @@
   /* undo/redo botones en barra */
   .act.dim{opacity:.38;pointer-events:none}
 
+  /* ---------- estado de exportación ---------- */
+  /* todo lo que es interfaz desaparece de la foto: barra, zoom, pistas,
+     herramientas, minimap, modales y también el aviso flotante (toast) */
   body.exporting .bar,body.exporting .zoom,body.exporting .tip,
   body.exporting .tools,body.exporting .addsub,body.exporting .kill,
   body.exporting .grip,body.exporting .hint,body.exporting .modal,
-  body.exporting #minimap{display:none !important}
+  body.exporting #minimap,body.exporting .toast,body.exporting .kbd-modal{display:none !important}
+  body.exporting #stage::after{content:none !important}
   body.exporting .node.sel,body.exporting .pic.sel{outline:none;box-shadow:var(--shadow);border-color:#C3CDBF}
   body.exporting #stage{inset:0;overflow:visible}
 
@@ -419,7 +426,7 @@
   <div class="mm-vp" id="mmVp"></div>
 </div>
 
-<p class="tip">Arrastra la franja de color para mover · Doble clic en el lienzo para crear · <kbd style="font:inherit;background:#EDF0E8;border:1px solid #C3CDBF;border-radius:3px;padding:0 4px">?</kbd> para atajos</p>
+<p class="tip">Arrastra la franja de color para mover · Doble clic para crear · Ctrl + V pega imágenes · <kbd style="font:inherit;background:#EDF0E8;border:1px solid #C3CDBF;border-radius:3px;padding:0 4px">?</kbd> para atajos</p>
 <div class="toast" id="toast"></div>
 
 <!-- modal markdown -->
@@ -490,6 +497,7 @@ Responde ÚNICAMENTE con el bloque Markdown, sin texto adicional, sin bloques de
       <kbd>−</kbd><span>Alejar</span>
       <kbd>Ctrl Rueda</kbd><span>Zoom en cursor</span>
       <kbd>Arrastrar fondo</kbd><span>Desplazar el lienzo</span>
+      <kbd>Ctrl V</kbd><span>Pegar una imagen o un bloque de Markdown</span>
       <kbd>?</kbd><span>Mostrar estos atajos</span>
     </div>
     <button class="btn solid kbd-close" id="kbdClose">Cerrar</button>
@@ -612,6 +620,10 @@ function toast(msg){
   toastEl.textContent = msg; toastEl.classList.add('on');
   clearTimeout(toast._t); toast._t = setTimeout(()=>toastEl.classList.remove('on'), 2400);
 }
+function hideToast(){
+  clearTimeout(toast._t);
+  toastEl.classList.remove('on');
+}
 function el(id){ return world.querySelector('[data-id="'+id+'"]'); }
 function leafEl(itemId){ return world.querySelector('[data-item="'+itemId+'"]'); }
 function childrenOf(id){ const out=[]; nodes.forEach(k=>{ if(k.parent===id) out.push(k); }); return out; }
@@ -660,7 +672,8 @@ function drawMinimap(){
   mmRaf = null;
   const mm = document.getElementById('minimap');
   if(!mm || !nodes.size && !pics.size){ return; }
-  const ctx = mmCanvas.getContext('2d');
+  const ctx = mmCanvas.getContext && mmCanvas.getContext('2d');
+  if(!ctx) return;                       // navegador sin canvas: el resto sigue vivo
   const cw = mmCanvas.width, ch = mmCanvas.height;
   ctx.clearRect(0, 0, cw, ch);
 
@@ -694,7 +707,8 @@ function drawMinimap(){
     const rw = NODE_W*scale, rh = Math.max(6, 28*scale);
     const r = 2;
     ctx.beginPath();
-    ctx.roundRect(rx,ry,rw,rh,r);
+    if(ctx.roundRect) ctx.roundRect(rx,ry,rw,rh,r);
+    else ctx.rect(rx,ry,rw,rh);
     ctx.fill();
   });
   pics.forEach(d=>{
@@ -822,19 +836,12 @@ function renderAll(){
   layoutLeaves(); drawLinks(); markContent(); updateMinimap();
 }
 
-/* posiciona las subsecciones sueltas al lado de su nodo (modo diagrama)
-   En layout radial las coloca en la dirección que apunta el nodo desde el centro */
+/* posiciona las subsecciones sueltas al lado de su nodo (modo diagrama) */
 function layoutLeaves(){
   if(mode !== 'split') return;
-
-  // Centro del mapa (raíz única si existe, sino centro estimado)
-  let cx = null, cy = null;
-  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)){ cx = d.x; cy = d.y; } });
-
   nodes.forEach(d => {
     if(!d.items.length) return;
     const n = el(d.id); if(!n) return;
-    const nw = n.offsetWidth, nh = n.offsetHeight;
     const stacked = [];
     d.items.forEach(it => {
       const e = leafEl(it.id); if(!e) return;
@@ -845,70 +852,12 @@ function layoutLeaves(){
       } else { e.classList.remove('free'); stacked.push(e); }
     });
     if(!stacked.length) return;
-
-    // Determinar dirección del nodo respecto al centro
-    // Si no hay centro (mapa manual sin raíz) → siempre a la derecha
-    let leafX, leafStartY, vertical = false, goDown = true, goRight = true;
-
-    if(cx !== null && cy !== null && d.id !== (()=>{ let r=null; nodes.forEach(nd=>{ if(!nd.parent||!nodes.has(nd.parent)) r=nd.id; }); return r; })()){
-      const nodeCx = d.x + nw/2;
-      const nodeCy = d.y + nh/2;
-      const rootCx = cx + NODE_W/2;
-      const rootCy = cy + 40;
-      const dx = nodeCx - rootCx;
-      const dy = nodeCy - rootCy;
-      const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
-      // Si el nodo es principalmente horizontal respecto al centro
-      if(absDx >= absDy * 0.5){
-        // colocar leaves horizontalmente (al mismo lado que el nodo)
-        vertical = false;
-        goRight  = dx >= 0;
-        let total = 0;
-        stacked.forEach(e => total += e.offsetHeight);
-        total += LEAF_GAP * (stacked.length - 1);
-        if(goRight){
-          leafX = d.x + nw + TRUNK + ARM;
-        } else {
-          leafX = d.x - LEAF_W - TRUNK - ARM;
-        }
-        leafStartY = d.y + nh/2 - total/2;
-      } else {
-        // colocar leaves verticalmente (arriba o abajo del nodo)
-        vertical = true;
-        goDown   = dy >= 0;
-        let total = 0;
-        stacked.forEach(e => total += e.offsetHeight);
-        total += LEAF_GAP * (stacked.length - 1);
-        if(goDown){
-          leafStartY = d.y + nh + TRUNK + ARM;
-        } else {
-          leafStartY = d.y - total - TRUNK - ARM;
-        }
-        leafX = d.x + nw/2 - LEAF_W/2;
-      }
-    } else {
-      // sin info de centro o es la raíz → derecha por defecto
-      vertical = false;
-      let total = 0;
-      stacked.forEach(e => total += e.offsetHeight);
-      total += LEAF_GAP * (stacked.length - 1);
-      leafX = d.x + nw + TRUNK + ARM;
-      leafStartY = d.y + nh/2 - total/2;
-    }
-
-    if(!vertical){
-      stacked.forEach(e => { e.style.left = Math.round(leafX)+'px'; });
-      let y = leafStartY;
-      stacked.forEach(e => { e.style.top = Math.round(y)+'px'; y += e.offsetHeight + LEAF_GAP; });
-    } else {
-      let y = leafStartY;
-      stacked.forEach(e => {
-        e.style.left = Math.round(leafX)+'px';
-        e.style.top  = Math.round(y)+'px';
-        y += e.offsetHeight + LEAF_GAP;
-      });
-    }
+    const x = d.x + n.offsetWidth + TRUNK + ARM;
+    let total = 0;
+    stacked.forEach(e => { e.style.left = x+'px'; total += e.offsetHeight; });
+    total += LEAF_GAP * (stacked.length - 1);
+    let y = d.y + n.offsetHeight/2 - total/2;
+    stacked.forEach(e => { e.style.top = Math.round(y)+'px'; y += e.offsetHeight + LEAF_GAP; });
   });
 }
 function clusterHeight(d){
@@ -979,45 +928,13 @@ function drawLinks(){
         } else els.push(e);
       });
       if(!els.length) return;
-
-      // Determinar si las leaves están a la derecha, izquierda, arriba o abajo
-      const firstEl = els[0];
-      const leafCx  = firstEl.offsetLeft + firstEl.offsetWidth/2;
-      const leafCy  = firstEl.offsetTop  + firstEl.offsetHeight/2;
-      const nodeCx  = A.x + A.w/2;
-      const nodeCy  = A.y + A.h/2;
-      const dxL = leafCx - nodeCx, dyL = leafCy - nodeCy;
-      const horizontal = Math.abs(dxL) >= Math.abs(dyL) * 0.5;
-
-      if(horizontal){
-        // conexión horizontal (izquierda o derecha)
-        const goRight = leafCx >= nodeCx;
-        const startX  = goRight ? A.x + A.w : A.x;
-        const cy2     = A.y + A.h/2;
-        const trunkX  = goRight ? startX + TRUNK : startX - TRUNK;
-        const centers = els.map(e => e.offsetTop + e.offsetHeight/2);
-        const top = Math.min(cy2, ...centers), bot = Math.max(cy2, ...centers);
-        let p = `M${startX} ${cy2}H${trunkX}M${trunkX} ${top}V${bot}`;
-        centers.forEach((c, i) => {
-          const leafEdge = goRight ? els[i].offsetLeft : els[i].offsetLeft + els[i].offsetWidth;
-          p += `M${trunkX} ${c}H${leafEdge}`;
-        });
-        d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
-      } else {
-        // conexión vertical (arriba o abajo)
-        const goDown  = leafCy >= nodeCy;
-        const startY  = goDown ? A.y + A.h : A.y;
-        const cx2     = A.x + A.w/2;
-        const trunkY  = goDown ? startY + TRUNK : startY - TRUNK;
-        const centers = els.map(e => e.offsetLeft + e.offsetWidth/2);
-        const left2   = Math.min(cx2, ...centers), right2 = Math.max(cx2, ...centers);
-        let p = `M${cx2} ${startY}V${trunkY}M${left2} ${trunkY}H${right2}`;
-        centers.forEach((c, i) => {
-          const leafEdge = goDown ? els[i].offsetTop : els[i].offsetTop + els[i].offsetHeight;
-          p += `M${c} ${trunkY}V${leafEdge}`;
-        });
-        d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
-      }
+      const startX = A.x + A.w, cy = A.y + A.h/2;
+      const trunkX = startX + TRUNK;
+      const centers = els.map(e => e.offsetTop + e.offsetHeight/2);
+      const top = Math.min(cy, ...centers), bot = Math.max(cy, ...centers);
+      let p = `M${startX} ${cy}H${trunkX}M${trunkX} ${top}V${bot}`;
+      centers.forEach((c, i) => { p += `M${trunkX} ${c}H${els[i].offsetLeft}`; });
+      d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
     });
   }
   links.innerHTML = d;
@@ -1042,8 +959,11 @@ function createItem(nodeId){
 /* eliminación con animación */
 function animRemove(nodeEl, cb){
   if(!nodeEl){ cb && cb(); return; }
+  let done = false;
+  const finish = () => { if(done) return; done = true; nodeEl.remove(); cb && cb(); };
   nodeEl.classList.add('removing');
-  nodeEl.addEventListener('animationend', ()=>{ nodeEl.remove(); cb && cb(); }, {once:true});
+  nodeEl.addEventListener('animationend', finish, {once:true});
+  setTimeout(finish, 260);                 // por si la animación no llega a correr
 }
 function deleteItem(nodeId, itemId){
   snapshot();
@@ -1052,9 +972,20 @@ function deleteItem(nodeId, itemId){
 function deleteNode(id){
   snapshot();
   const nodeEl = el(id);
-  animRemove(nodeEl, ()=>{ removeNode(id); renderAll(); });
-  // también eliminar del mapa de datos inmediatamente para que no se re-renderice
+  // se re-dibuja de una para que datos y pantalla nunca queden desfasados;
+  // la animación de salida corre sobre una copia que se descarta sola
+  if(nodeEl){
+    const ghost = nodeEl.cloneNode(true);
+    ghost.removeAttribute('data-id');
+    ghost.style.left = nodeEl.offsetLeft+'px';
+    ghost.style.top  = nodeEl.offsetTop+'px';
+    ghost.style.pointerEvents = 'none';
+    world.appendChild(ghost);
+    animRemove(ghost);
+    setTimeout(()=>ghost.remove(), 400);   // red de seguridad
+  }
   removeNode(id);
+  renderAll();
 }
 
 /* ─────────────────────────── imágenes ──────────────────────────────── */
@@ -1070,7 +1001,53 @@ function addImage(src, x, y){
     f.style.width = w+'px'; d.w = w;
     snapshot();
   };
+  img.onerror = () => {
+    f.remove(); pics.delete(id); markContent();
+    toast('No se pudo cargar esa imagen. Descárgala y arrástrala al lienzo.');
+  };
   markContent();
+}
+/* saca los archivos de imagen del portapapeles o de un arrastre */
+function imageFiles(dt){
+  if(!dt) return [];
+  const out = [];
+  [...(dt.files || [])].forEach(f => { if(f && f.type && f.type.startsWith('image/')) out.push(f); });
+  if(!out.length) [...(dt.items || [])].forEach(i => {
+    if(i.kind === 'file' && i.type && i.type.startsWith('image/')){
+      const f = i.getAsFile(); if(f) out.push(f);
+    }
+  });
+  return out;
+}
+/* cuando se copia desde una página web solo llega el HTML: sacamos el src */
+function imageUrlFrom(dt){
+  if(!dt) return null;
+  const html = dt.getData('text/html') || '';
+  const m = /<img[^>]+src\s*=\s*["']([^"']+)["']/i.exec(html);
+  if(m) return m[1];
+  const uri = (dt.getData('text/uri-list') || '').split('\n')[0].trim();
+  const txt = (dt.getData('text') || '').trim();
+  const cand = uri || txt;
+  if(/^data:image\//i.test(cand)) return cand;
+  if(/^https?:\/\/\S+\.(png|jpe?g|gif|webp|svg|avif)(\?\S*)?$/i.test(cand)) return cand;
+  return null;
+}
+/* trae la imagen y la incrusta; si el servidor no deja, la enlaza y avisa */
+async function addImageFromUrl(url, x, y){
+  if(/^data:image\//i.test(url)){ addImage(url, x, y); toast('Imagen pegada.'); return; }
+  toast('Trayendo la imagen…');
+  try{
+    const res = await fetch(url, {mode:'cors'});
+    if(!res.ok) throw new Error('http');
+    const blob = await res.blob();
+    if(!blob.type.startsWith('image/')) throw new Error('tipo');
+    const fr = new FileReader();
+    fr.onload = ev => { addImage(ev.target.result, x, y); toast('Imagen pegada.'); };
+    fr.readAsDataURL(blob);
+  }catch(err){
+    addImage(url, x, y);
+    toast('Imagen enlazada. Si no sale al exportar, descárgala y arrástrala.');
+  }
 }
 function readFiles(files, wx, wy){
   let i = 0;
@@ -1092,7 +1069,8 @@ world.addEventListener('pointerdown', e => {
   if(grip){
     const f = grip.closest('.pic');
     drag = {mode:'resize', el:f, id:f.dataset.id, sx:e.clientX, w0:f.offsetWidth};
-    f.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    if(f.setPointerCapture) f.setPointerCapture(e.pointerId);
+    e.preventDefault(); return;
   }
   const lf = e.target.closest('.leaf');
   if(lf){
@@ -1274,7 +1252,7 @@ stage.addEventListener('pointerdown', e => {
   select(null);
   pan = {sx:e.clientX, sy:e.clientY, x0:view.x, y0:view.y};
   stage.classList.add('panning');
-  stage.setPointerCapture(e.pointerId);
+  if(stage.setPointerCapture) stage.setPointerCapture(e.pointerId);
 });
 stage.addEventListener('pointermove', e => {
   if(!pan) return;
@@ -1293,7 +1271,7 @@ stage.addEventListener('dblclick', e => {
 
 stage.addEventListener('wheel', e => {
   e.preventDefault();
-  // pinch / ctrl+wheel → zoom; shift+wheel o rueda horizontal → pan horizontal; resto → pan vertical + pan con 2 dedos
+  // pinch / ctrl+wheel → zoom; resto → desplazar el lienzo
   if(e.ctrlKey || e.metaKey){
     zoomAt(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
   } else {
@@ -1306,19 +1284,39 @@ stage.addEventListener('wheel', e => {
 ['dragenter','dragover'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
 document.addEventListener('drop', e => {
   e.preventDefault();
-  if(!e.dataTransfer || !e.dataTransfer.files.length) return;
+  const dt = e.dataTransfer; if(!dt) return;
   const p = screenToWorld(e.clientX, e.clientY);
-  readFiles(e.dataTransfer.files, p.x - 130, p.y - 90);
+  const files = imageFiles(dt);
+  if(files.length){ readFiles(files, p.x - 130, p.y - 90); return; }
+  const url = imageUrlFrom(dt);          // arrastrada desde otra pestaña
+  if(url) addImageFromUrl(url, p.x - 130, p.y - 90);
 });
+/* Se registra en fase de captura para atender la imagen ANTES que el editor de
+   texto: así pegar funciona aunque el cursor esté dentro de un nodo. */
+document.addEventListener('paste', e => {
+  if(e.target === mdText) return;              // el panel de markdown recibe texto normal
+  const cd = e.clipboardData; if(!cd) return;
+  const c = centerOfScreen();
+
+  const files = imageFiles(cd);
+  if(files.length){
+    e.preventDefault(); e.stopPropagation();
+    if(editable(e.target)) e.target.blur();
+    readFiles(files, c.x-130, c.y-90);
+    return;
+  }
+  const url = imageUrlFrom(cd);
+  if(url){
+    e.preventDefault(); e.stopPropagation();
+    if(editable(e.target)) e.target.blur();
+    addImageFromUrl(url, c.x-130, c.y-90);
+    return;
+  }
+}, true);
+
 document.addEventListener('paste', e => {
   if(editable(e.target) || e.target === mdText) return;
   const cd = e.clipboardData; if(!cd) return;
-  const imgs = [...(cd.items||[])].filter(i => i.type.startsWith('image/'));
-  if(imgs.length){
-    const c = centerOfScreen();
-    readFiles(imgs.map(i => i.getAsFile()).filter(Boolean), c.x-130, c.y-90);
-    return;
-  }
   const txt = (cd.getData('text')||'').trim();
   if(txt && /^\s*(#{1,6}\s|[-*+]\s)/m.test(txt)){
     e.preventDefault(); openModal(txt);
@@ -1380,7 +1378,6 @@ document.getElementById('zOut').onclick = () => { const r=stage.getBoundingClien
 document.getElementById('zFit').onclick = fit;
 document.getElementById('btnUndo').onclick = undo;
 document.getElementById('btnRedo').onclick = redo;
-document.getElementById('btnHelp').onclick = openKbd;
 
 // título de la pestaña se actualiza con el nombre del mapa
 document.getElementById('mapTitle').addEventListener('input', updateTitle);
@@ -1404,125 +1401,6 @@ function setMode(m){
 /* ─────────────────────────── ordenar ──────────────────────────────── */
 function tidy(){
   if(!nodes.size){ toast('El mapa está vacío.'); return; }
-
-  const roots = [];
-  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)) roots.push(d); });
-
-  if(roots.length === 1){
-    tidyRadial(roots[0]);
-  } else {
-    tidyTree(roots);
-  }
-  nodes.forEach(d => { const e = el(d.id); if(e){ e.style.left = d.x+'px'; e.style.top = d.y+'px'; } });
-  layoutLeaves(); drawLinks(); fit();
-}
-
-/*
- * Layout radial — hijos siempre hacia afuera en la dirección del padre
- * ─────────────────────────────────────────────────────────────────────
- * Cada nodo recibe un SECTOR angular (ángulo central ± mitad del arco).
- * Sus hijos se distribuyen DENTRO de ese mismo sector, más afuera.
- * Así un nodo a la derecha tiene sus hijos más a la derecha,
- * uno arriba-izquierda los tiene más arriba-izquierda, etc.
- *
- * Pasadas:
- *  1) bottom-up : leafCount  → cuántas hojas tiene cada subárbol
- *  2) bottom-up : minArc     → ángulo mínimo que necesita cada nodo
- *                              para que sus hijos no se solapen al
- *                              radio que les corresponda
- *  3) top-down  : asignar ángulo central y radio
- */
-function tidyRadial(root){
-  const NW      = 300;   // ancho nodo + margen horizontal
-  const NH      = 120;   // alto nodo  + margen vertical
-  const R_STEP  = 520;   // distancia mínima entre anillos (aumentada)
-  const CX = 6200, CY = 4400;
-
-  /* ── 1. leafCount ── */
-  const leafCount = new Map();
-  function countLeaves(id){
-    const kids = childrenOf(id);
-    if(!kids.length){ leafCount.set(id,1); return 1; }
-    const s = kids.reduce((a,k)=> a + countLeaves(k.id), 0);
-    leafCount.set(id,s); return s;
-  }
-  countLeaves(root.id);
-
-  /* ── 2. minArc por nodo: el arco mínimo para que sus hijos quepan
-           en el anillo radio r sin solaparse entre sí.
-           chord = distancia mínima entre centros de nodos hermanos
-                 = sqrt(NW² + NH²) + margen
-           Para n hijos en radio r con arco total A:
-             chord ≈ 2·r·sin(A/(2n))  =>  A = 2n·arcsin(chord/(2r))
-           Elegimos r como radio_padre + R_STEP.                    ── */
-  const nodeAngle  = new Map();   // ángulo central asignado (top-down)
-  const nodeRadius = new Map();   // radio asignado (top-down)
-  const nodeArc    = new Map();   // arco total asignado al sector del nodo
-
-  /* radio del nodo según su profundidad desde la raíz */
-  const depthOf = new Map();
-  function calcDepth(id, d){ depthOf.set(id,d); childrenOf(id).forEach(k=>calcDepth(k.id,d+1)); }
-  calcDepth(root.id, 0);
-
-  function radiusAt(depth){ return depth * R_STEP; }
-
-  /* ── 3. top-down: distribuir sectores ── */
-  /* Ángulo de apertura mínima para n hijos en radio r */
-  function minSweepForChildren(n, r){
-    if(n === 0) return 0;
-    const chord = Math.sqrt(NW*NW + NH*NH) + 20;  // separación mínima entre centros
-    // arco mínimo total = n × separación_angular_mínima
-    // sep_angular = 2·arcsin(chord / (2·r))  [ángulo entre centros vecinos]
-    const halfAngle = Math.asin(Math.min(1, chord / (2 * Math.max(r, chord))));
-    return n * 2 * halfAngle;
-  }
-
-  function distribute(id, centerAngle, availableSweep, depth){
-    const kids = childrenOf(id);
-    if(!kids.length) return;
-
-    const r      = radiusAt(depth);
-    const total  = leafCount.get(id);
-
-    // asegurarnos de que el sweep disponible es suficiente para los hijos
-    const minSweep = minSweepForChildren(kids.length, r);
-    const sweep  = Math.max(availableSweep, minSweep);
-
-    // distribuir proporcionalmente al leafCount de cada hijo
-    let cursor = centerAngle - sweep / 2;
-    kids.forEach(k => {
-      const kLeaves  = leafCount.get(k.id);
-      const kArc     = sweep * (kLeaves / total);
-      const kCenter  = cursor + kArc / 2;
-
-      const kd = nodes.get(k.id);
-      kd.x = Math.round(CX + r * Math.cos(kCenter) - NW/2);
-      kd.y = Math.round(CY + r * Math.sin(kCenter) - NH/2);
-
-      nodeAngle.set(k.id,  kCenter);
-      nodeRadius.set(k.id, r);
-      nodeArc.set(k.id,    kArc);
-
-      // los hijos de k se distribuyen dentro del mismo sector kArc,
-      // centrado en kCenter → se expanden en la misma dirección
-      distribute(k.id, kCenter, kArc, depth + 1);
-      cursor += kArc;
-    });
-  }
-
-  /* raíz en el centro */
-  root.x = Math.round(CX - NW/2);
-  root.y = Math.round(CY - NH/2);
-  nodeAngle.set(root.id,  0);
-  nodeRadius.set(root.id, 0);
-  nodeArc.set(root.id, 2 * Math.PI);
-
-  /* los hijos directos de la raíz reparten los 360° completos */
-  distribute(root.id, -Math.PI / 2, 2 * Math.PI, 1);
-}
-
-/* Layout árbol clásico (múltiples raíces sin centro único) */
-function tidyTree(roots){
   const col = (mode === 'split' ? 620 : 360);
   const VGAP = 30;
   let cursor = 0;
@@ -1541,6 +1419,8 @@ function tidyTree(roots){
     }
     d.x = depth * col; d.y = Math.round(y);
   }
+  const roots = [];
+  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)) roots.push(d); });
   roots.forEach(r => { place(r, 0); cursor += 40; });
   nodes.forEach(d => { if(!seen.has(d.id)) place(d, 0); });
 
@@ -1548,6 +1428,8 @@ function tidyTree(roots){
   nodes.forEach(d => { minX = Math.min(minX, d.x); minY = Math.min(minY, d.y); });
   const off = {x:6000 - minX, y:4200 - minY};
   nodes.forEach(d => { d.x += off.x; d.y += off.y; });
+  nodes.forEach(d => { const e = el(d.id); if(e){ e.style.left = d.x+'px'; e.style.top = d.y+'px'; } });
+  layoutLeaves(); drawLinks(); fit();
 }
 
 function bounds(pad){
@@ -1601,7 +1483,7 @@ function cleanInline(s){
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/(\*\*|__|`|~~)/g, '')
     .replace(/^\*(.*)\*$/, '$1')
-    .replace(/\{color:[^}]+\}/g, '')  // quitar la etiqueta de color del texto visible
+    .replace(/\{color:[^}]+\}/gi, '')  // quitar la etiqueta de color del texto visible
     .trim();
 }
 
@@ -1766,7 +1648,7 @@ document.getElementById('copyPrompt').onclick = () => {
 };
 
 /* ─────────────────────────── exportar ─────────────────────────────── */
-async function snapshot_export(){
+async function captureCanvas(){
   const b = bounds();
   if(!b){ toast('Agrega algo al mapa antes de exportar.'); return null; }
   if(typeof html2canvas === 'undefined'){
@@ -1774,10 +1656,11 @@ async function snapshot_export(){
     return null;
   }
   select(null);
+  hideToast();                       // el aviso no debe salir en la foto
   const prev = {x:view.x, y:view.y, s:view.s};
   document.body.classList.add('exporting');
   world.style.transform = `translate(${-b.x}px,${-b.y}px) scale(1)`;
-  await new Promise(r => setTimeout(r, 80));
+  await new Promise(r => requestAnimationFrame(()=>setTimeout(r, 90)));
   try{
     const r = stage.getBoundingClientRect();
     return await html2canvas(document.body, {
@@ -1787,7 +1670,13 @@ async function snapshot_export(){
       width: b.w, height: b.h,
       windowWidth: Math.max(document.documentElement.clientWidth, b.w + 40),
       windowHeight: Math.max(document.documentElement.clientHeight, b.h + 40),
-      useCORS:true, logging:false
+      useCORS:true, logging:false,
+      ignoreElements: n => n.classList && (
+        n.classList.contains('toast') || n.classList.contains('bar') ||
+        n.classList.contains('zoom')  || n.classList.contains('tip') ||
+        n.classList.contains('modal') || n.classList.contains('kbd-modal') ||
+        n.id === 'minimap'
+      )
     });
   } finally {
     document.body.classList.remove('exporting');
@@ -1800,16 +1689,14 @@ function fileName(ext){
   return (t.toLowerCase().replace(/[^\w\sáéíóúñ-]/g,'').replace(/\s+/g,'-').slice(0,50) || 'mapa-mental') + '.' + ext;
 }
 document.getElementById('btnPng').onclick = async () => {
-  toast('Preparando el PNG…');
-  const c = await snapshot_export(); if(!c) return;
+  const c = await captureCanvas(); if(!c) return;
   const a = document.createElement('a');
   a.download = fileName('png'); a.href = c.toDataURL('image/png'); a.click();
   toast('PNG descargado.');
 };
 document.getElementById('btnPdf').onclick = async () => {
   if(!window.jspdf){ toast('No cargó la librería de PDF. Usa Ctrl + P y guarda como PDF.'); return; }
-  toast('Preparando el PDF…');
-  const c = await snapshot_export(); if(!c) return;
+  const c = await captureCanvas(); if(!c) return;
   const {jsPDF} = window.jspdf;
   const w = c.width, h = c.height;
   const pdf = new jsPDF({orientation: w >= h ? 'landscape' : 'portrait', unit:'px', format:[w,h], compress:true});
