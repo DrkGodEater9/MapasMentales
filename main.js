@@ -1,4 +1,4 @@
-﻿(function(){
+(function(){
 "use strict";
 
 /* ───────────────────────────── constantes ───────────────────────────── */
@@ -923,6 +923,75 @@ function tidy(){
   layoutLeaves(); drawLinks(); fit();
 }
 
+function tidyRadial(){
+  if(!nodes.size){ toast('El mapa está vacío.'); return; }
+  const col = (mode === 'split' ? 620 : 360);
+  const seen = new Set();
+  
+  function getWeight(id) {
+    const kids = childrenOf(id);
+    if (!kids.length) return 1;
+    return kids.reduce((sum, k) => sum + getWeight(k.id), 0);
+  }
+  
+  function place(d, depth, angleStart, angleEnd) {
+    if(seen.has(d.id)) return; seen.add(d.id);
+    const midAngle = (angleStart + angleEnd) / 2;
+    // Radius increases with depth to prevent overlapping
+    const radius = depth === 0 ? 0 : (mode === 'split' ? 300 : 250) + depth * col;
+    
+    if (depth === 0) {
+      d.x = 0;
+      d.y = 0;
+    } else {
+      d.x = radius * Math.cos(midAngle);
+      d.y = radius * Math.sin(midAngle);
+    }
+    
+    const kids = childrenOf(d.id);
+    if (!kids.length) return;
+    
+    const totalWeight = kids.reduce((sum, k) => sum + getWeight(k.id), 0);
+    let currentAngle = angleStart;
+    
+    kids.forEach(k => {
+      const w = getWeight(k.id);
+      const sweep = (w / totalWeight) * (angleEnd - angleStart);
+      place(k, depth + 1, currentAngle, currentAngle + sweep);
+      currentAngle += sweep;
+    });
+  }
+  
+  const roots = [];
+  nodes.forEach(d => { if(!d.parent || !nodes.has(d.parent)) roots.push(d); });
+  
+  let totalRootWeight = roots.reduce((sum, r) => sum + getWeight(r.id), 0);
+  let currentRootAngle = 0;
+  
+  roots.forEach(r => {
+    const w = getWeight(r.id);
+    const sweep = roots.length === 1 ? Math.PI * 2 : (w / totalRootWeight) * Math.PI * 2;
+    place(r, 0, currentRootAngle, currentRootAngle + sweep);
+    currentRootAngle += sweep;
+  });
+  
+  nodes.forEach(d => { if(!seen.has(d.id)) place(d, 0, 0, Math.PI * 2); });
+  
+  let minX = Infinity, minY = Infinity;
+  nodes.forEach(d => { 
+    d.x -= clusterWidth(d)/2; 
+    d.y -= clusterHeight(d)/2;
+    minX = Math.min(minX, d.x); 
+    minY = Math.min(minY, d.y); 
+  });
+  
+  const off = {x:6000 - minX, y:4200 - minY};
+  nodes.forEach(d => { d.x = Math.round(d.x + off.x); d.y = Math.round(d.y + off.y); });
+  nodes.forEach(d => { const e = el(d.id); if(e){ e.style.left = d.x+'px'; e.style.top = d.y+'px'; } });
+  
+  layoutLeaves(); drawLinks(); fit();
+}
+
 function bounds(pad){
   pad = pad == null ? 70 : pad;
   const items = world.querySelectorAll('.node, .pic, .leaf');
@@ -1070,7 +1139,7 @@ function importMarkdown(text, replace){
     p.items.forEach(txt => addItem(id, txt));
   });
   selected = null;
-  renderAll(); tidy();
+  renderAll(); tidyRadial();
   toast(parsed.length + (parsed.length === 1 ? ' nodo insertado.' : ' nodos insertados.'));
 }
 
