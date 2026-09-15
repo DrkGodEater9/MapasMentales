@@ -169,7 +169,7 @@ function drawMinimap(){
   ctx.clearRect(0, 0, cw, ch);
 
   // fondo
-  ctx.fillStyle = '#DBE2D8';
+  ctx.fillStyle = (document.documentElement.classList.contains('dark') ? '#1A1E1C' : '#DBE2D8');
   ctx.fillRect(0, 0, cw, ch);
 
   // calcular bounding de todo el contenido
@@ -192,7 +192,7 @@ function drawMinimap(){
 
   // dibujar nodos
   nodes.forEach(d=>{
-    ctx.fillStyle = d.color;
+    ctx.fillStyle = d.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : d.color;
     ctx.globalAlpha = 0.7;
     const rx = d.x*scale+ox, ry = d.y*scale+oy;
     const rw = NODE_W*scale, rh = Math.max(6, 28*scale);
@@ -203,7 +203,7 @@ function drawMinimap(){
     ctx.fill();
   });
   pics.forEach(d=>{
-    ctx.fillStyle = '#C3CDBF';
+    ctx.fillStyle = (document.documentElement.classList.contains('dark') ? '#3B4A41' : '#C3CDBF');
     ctx.globalAlpha = 0.6;
     ctx.fillRect(d.x*scale+ox, d.y*scale+oy, d.w*scale, d.w*0.6*scale);
   });
@@ -277,7 +277,7 @@ function clearAll(){
 function buildNode(d){
   const n = document.createElement('article');
   n.className = 'node'; n.dataset.id = d.id; n.dataset.kind = 'node';
-  n.style.setProperty('--c', d.color);
+  n.style.setProperty('--c', d.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : d.color);
   n.style.left = d.x+'px'; n.style.top = d.y+'px';
   const subs = (mode === 'card')
     ? d.items.map(it => `<li data-item="${it.id}"><span class="sub" contenteditable spellcheck="false">${esc(it.text)}</span><button class="kill" data-act="delsub" title="Quitar">×</button></li>`).join('')
@@ -302,7 +302,7 @@ function buildLeaf(d, it){
   const f = document.createElement('div');
   f.className = 'leaf';
   f.dataset.item = it.id; f.dataset.node = d.id;
-  f.style.setProperty('--c', d.color);
+  f.style.setProperty('--c', d.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : d.color);
   f.style.width = LEAF_W+'px';
   if(it.free) f.classList.add('free');
   f.innerHTML = `<span class="leaf-grip" title="Arrastra para moverla · doble clic para reacomodarla"></span><span class="sub" contenteditable spellcheck="false">${esc(it.text)}</span><button class="kill" data-act="delsub" title="Quitar">×</button>`;
@@ -404,7 +404,7 @@ function drawLinks(){
       const k2 = Math.max(36, Math.abs(p2.y-p1.y)*0.45);
       path = `M${p1.x} ${p1.y}C${p1.x} ${p1.y+s*k2} ${p2.x} ${p2.y-s*k2} ${p2.x} ${p2.y}`;
     }
-    d += `<path d="${path}" stroke="${color}" opacity=".55"/>`;
+    d += `<path d="${path}" stroke="${color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : color}" opacity=".55"/>`;
   });
 
   if(mode === 'split'){
@@ -415,7 +415,7 @@ function drawLinks(){
         const e = leafEl(it.id); if(!e) return;
         if(it.free){
           const B = {x:e.offsetLeft, y:e.offsetTop, w:e.offsetWidth, h:e.offsetHeight};
-          d += `<path d="${ortho(A, B)}" stroke="${k.color}" opacity=".45"/>`;
+          d += `<path d="${ortho(A, B)}" stroke="${k.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : k.color}" opacity=".45"/>`;
         } else els.push(e);
       });
       if(!els.length) return;
@@ -425,7 +425,7 @@ function drawLinks(){
       const top = Math.min(cy, ...centers), bot = Math.max(cy, ...centers);
       let p = `M${startX} ${cy}H${trunkX}M${trunkX} ${top}V${bot}`;
       centers.forEach((c, i) => { p += `M${trunkX} ${c}H${els[i].offsetLeft}`; });
-      d += `<path d="${p}" stroke="${k.color}" opacity=".5"/>`;
+      d += `<path d="${p}" stroke="${k.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : k.color}" opacity=".5"/>`;
     });
   }
   links.innerHTML = d;
@@ -640,8 +640,8 @@ world.addEventListener('click', e => {
     snapshot();
     const n = sw.closest('.node'), d = nodes.get(n.dataset.id);
     d.color = sw.dataset.color;
-    n.style.setProperty('--c', d.color);
-    d.items.forEach(it => { const l = leafEl(it.id); if(l) l.style.setProperty('--c', d.color); });
+    n.style.setProperty('--c', d.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : d.color);
+    d.items.forEach(it => { const l = leafEl(it.id); if(l) l.style.setProperty('--c', d.color === '#1B2A22' && document.documentElement.classList.contains('dark') ? '#8FA698' : d.color); });
     drawLinks(); return;
   }
   const btn = e.target.closest('[data-act]');
@@ -1224,7 +1224,7 @@ async function captureCanvas(){
   try{
     const r = stage.getBoundingClientRect();
     return await html2canvas(document.body, {
-      backgroundColor:'#DBE2D8',
+      backgroundColor:(document.documentElement.classList.contains('dark') ? '#1A1E1C' : '#DBE2D8'),
       scale: Math.min(2, (window.devicePixelRatio || 1) * 1.4),
       x: r.left + window.scrollX, y: r.top + window.scrollY,
       width: b.w, height: b.h,
@@ -1291,3 +1291,30 @@ updateTitle();
 window.MM = {nodes, pics, view, parseMarkdown, importMarkdown, setMode, createNode, createItem,
              deleteNode, deleteItem, addImage, tidy, clearAll, getMode:()=>mode, renderAll, undo, redo};
 })();
+
+/* --------------------------- tema (dark mode) ------------------------- */
+const btnTheme = document.getElementById('btnTheme');
+const sunIcon = '<path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364-.707-.707M6.343 6.343l-.707-.707m12.728 0-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"/>';
+const moonIcon = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+
+function setTheme(isDark) {
+  if (isDark) {
+    document.documentElement.classList.add('dark');
+    btnTheme.querySelector('svg').innerHTML = sunIcon;
+    localStorage.setItem('theme', 'dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+    btnTheme.querySelector('svg').innerHTML = moonIcon;
+    localStorage.setItem('theme', 'light');
+  }
+  if (typeof renderAll === 'function') renderAll();
+}
+
+const savedTheme = localStorage.getItem('theme');
+if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  setTheme(true);
+}
+
+btnTheme.addEventListener('click', () => {
+  setTheme(!document.documentElement.classList.contains('dark'));
+});
