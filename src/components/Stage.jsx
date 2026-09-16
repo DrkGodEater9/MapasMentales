@@ -1,4 +1,4 @@
-﻿import React, { useRef, useLayoutEffect } from 'react';
+import React, { useRef, useLayoutEffect } from 'react';
 import { useStore } from '../store';
 import Node from './Node';
 import Picture from './Picture';
@@ -18,13 +18,12 @@ export default function Stage() {
 
   const handlePointerDown = (e) => {
     if (e.button !== 0) return; // Only left click
-
-    const state = useStore.getState();
     const target = e.target;
     
     const nodeEl = target.closest('.node');
     const picEl = target.closest('.pic');
     const leafEl = target.closest('.leaf');
+    const gripEl = target.closest('.grip');
 
     // Handle Selection FIRST
     if (nodeEl) {
@@ -38,6 +37,8 @@ export default function Stage() {
     }
 
     // Handle Dragging
+    const state = useStore.getState();
+
     if (
       target.isContentEditable || 
       target.tagName === 'TEXTAREA' || 
@@ -48,9 +49,19 @@ export default function Stage() {
       return; // Do not drag if interacting with content/buttons
     }
 
+    if (gripEl && picEl) {
+      const id = picEl.id.replace('p-', '');
+      window.__startDrag = { type: 'resizePic', id, ix: e.clientX, w0: state.pics[id].w, viewS: view.s };
+      if (picEl.setPointerCapture) picEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+
     if (nodeEl) {
       const id = nodeEl.dataset.id;
       window.__startDrag = { type: 'node', id, ix: e.clientX, iy: e.clientY, nx: state.nodes[id].x, ny: state.nodes[id].y, viewS: view.s };
+      if (nodeEl.setPointerCapture) nodeEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
       return;
     }
 
@@ -59,17 +70,22 @@ export default function Stage() {
       const nodeId = leafEl.dataset.nodeId;
       const item = state.nodes[nodeId].items.find(i => i.id === id);
       window.__startDrag = { type: 'leaf', id, nodeId, ix: e.clientX, iy: e.clientY, nx: item.dx || 0, ny: item.dy || 0, viewS: view.s };
+      if (leafEl.setPointerCapture) leafEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
       return;
     }
 
     if (picEl) {
       const id = picEl.id.replace('p-', '');
       window.__startDrag = { type: 'pic', id, ix: e.clientX, iy: e.clientY, nx: state.pics[id].x, ny: state.pics[id].y, viewS: view.s };
+      if (picEl.setPointerCapture) picEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
       return;
     }
 
     if (!target.closest('.item') && !target.closest('.tools')) {
       window.__startDrag = { type: 'pan', ix: e.clientX, iy: e.clientY, startX: view.x, startY: view.y };
+      e.preventDefault();
     }
   };
 

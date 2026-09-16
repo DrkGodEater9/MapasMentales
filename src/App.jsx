@@ -1,13 +1,30 @@
-﻿import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Toolbar from './components/Toolbar';
 import Stage from './components/Stage';
 import Minimap from './components/Minimap';
 import ZoomControls from './components/ZoomControls';
 import { useStore } from './store';
+import { handlePaste, handleDrop } from './imageHandler';
 
 export default function App() {
   const { view, setView, theme, nodes, pics } = useStore();
   const dragRef = useRef(null);
+
+  useEffect(() => {
+    // Paste listener (needs to be capture phase to run before contenteditable handles it)
+    document.addEventListener('paste', handlePaste, true);
+    document.addEventListener('drop', handleDrop);
+    const prevent = e => e.preventDefault();
+    document.addEventListener('dragenter', prevent);
+    document.addEventListener('dragover', prevent);
+
+    return () => {
+      document.removeEventListener('paste', handlePaste, true);
+      document.removeEventListener('drop', handleDrop);
+      document.removeEventListener('dragenter', prevent);
+      document.removeEventListener('dragover', prevent);
+    };
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -90,12 +107,18 @@ export default function App() {
         const dx = (e.clientX - drag.ix) / state.view.s;
         const dy = (e.clientY - drag.iy) / state.view.s;
         
-        if (drag.type === 'node' || drag.type === 'leaf') {
+        if (drag.type === 'node' || drag.type === 'leaf' || drag.type === 'pic') {
           if (drag.type === 'node') {
             state.updateNode(drag.id, { x: drag.nx + dx, y: drag.ny + dy });
           } else if (drag.type === 'leaf') {
             state.updateItem(drag.nodeId, drag.id, { free: true, dx: drag.nx + dx, dy: drag.ny + dy });
+          } else if (drag.type === 'pic') {
+            state.updatePic(drag.id, { x: drag.nx + dx, y: drag.ny + dy });
           }
+        } else if (drag.type === 'resizePic') {
+          const dx = (e.clientX - drag.ix) / state.view.s;
+          const newW = Math.max(50, drag.w0 + dx);
+          state.updatePic(drag.id, { w: newW });
         }
       }
     };

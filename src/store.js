@@ -227,22 +227,30 @@ export const useStore = create((set, get) => ({
   deleteItem: (nodeId, itemId) => set((state) => {
     const node = state.nodes[nodeId];
     if (!node) return state;
-    return { nodes: { ...state.nodes, [nodeId]: { ...node, items: node.items.filter(it => it.id !== itemId) } } };
+    const newItems = node.items.filter(i => i.id !== itemId);
+    return { nodes: { ...state.nodes, [nodeId]: { ...node, items: newItems } } };
   }),
-
-  addPic: (src, x, y, w = 260) => {
-    const id = generateId('p');
-    set((state) => ({ pics: { ...state.pics, [id]: { id, x: Math.round(x), y: Math.round(y), w, src } } }));
-    return id;
-  },
-
-  updatePic: (id, updates) => set((state) => ({ pics: { ...state.pics, [id]: { ...state.pics[id], ...updates } } })),
 
   deletePic: (id) => set((state) => {
     const newPics = { ...state.pics };
     delete newPics[id];
     return { pics: newPics, selected: state.selected === id ? null : state.selected };
   }),
+
+  addImage: (src, x, y) => {
+    const id = generateId('p');
+    set((state) => ({
+      pics: {
+        ...state.pics,
+        [id]: { id, x: Math.round(x), y: Math.round(y), w: 260, src }
+      }
+    }));
+    return id;
+  },
+
+  updatePic: (id, updates) => set((state) => ({
+    pics: { ...state.pics, [id]: { ...state.pics[id], ...updates } }
+  })),
 
   clearAll: () => set({ nodes: {}, pics: {}, selected: null }),
   replaceState: (nodes, pics) => set({ nodes, pics, selected: null })
