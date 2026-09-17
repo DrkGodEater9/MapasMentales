@@ -32,8 +32,8 @@ async function captureCanvas() {
   
   const world = document.getElementById('world');
   
-  // Reset transform so world is rendered at its natural unscaled size for capturing
-  world.style.transform = `translate(${-b.x}px,${-b.y}px) scale(1)`;
+  // Remove any translation so html2canvas computes coords accurately within world
+  world.style.transform = `translate(0px, 0px) scale(1)`;
   
   await new Promise(r => requestAnimationFrame(() => setTimeout(r, 90)));
   
@@ -41,6 +41,8 @@ async function captureCanvas() {
     return await html2canvas(world, {
       backgroundColor: document.documentElement.classList.contains('dark') ? '#1A1E1C' : '#DBE2D8',
       scale: Math.min(2, (window.devicePixelRatio || 1) * 1.4),
+      x: b.x,
+      y: b.y,
       width: b.w,
       height: b.h,
       useCORS: true,
