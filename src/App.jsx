@@ -1,14 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import Stage from './components/Stage';
 import Minimap from './components/Minimap';
 import ZoomControls from './components/ZoomControls';
+import ShortcutsModal from './components/ShortcutsModal';
 import { useStore } from './store';
 import { handlePaste, handleDrop } from './imageHandler';
 
 export default function App() {
   const { view, setView, theme, nodes, pics } = useStore();
   const dragRef = useRef(null);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
 
   useEffect(() => {
     // Paste listener (needs to be capture phase to run before contenteditable handles it)
@@ -58,12 +60,18 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsShortcutsOpen(false);
+      }
+
       const isInput = e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
       
       const state = useStore.getState();
       const selId = state.selectedId;
       
-      if (e.key === 'Tab' && selId && !isInput) {
+      if (e.key === '?' && !isInput) {
+        setIsShortcutsOpen(true);
+      } else if (e.key === 'Tab' && selId && !isInput) {
         e.preventDefault();
         const selNode = state.nodes[selId];
         if (selNode) {
@@ -145,6 +153,8 @@ export default function App() {
       <Stage />
       <Minimap />
       <ZoomControls />
+      <ShortcutsModal isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+      <p className="tip">Arrastra la franja de color para mover · Doble clic para crear · Ctrl + V pega imágenes · <kbd style={{font:'inherit', background:'#EDF0E8', border:'1px solid #C3CDBF', borderRadius:'3px', padding:'0 4px', cursor: 'pointer'}} onClick={() => setIsShortcutsOpen(true)}>?</kbd> para atajos</p>
       <div className="toast" id="toast"></div>
     </>
   );
